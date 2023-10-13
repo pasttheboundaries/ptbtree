@@ -1,38 +1,7 @@
 """
 classes constituting tree structure:
 Node and Tree
-
-Node:
-    Can exist on its own.
-    If has children (node.children : list) is considered a parent of the children nodes.
-    If has a parent (node.parent) is considered to be a child of the parent.
-    Defining a child (node.set_child(child)) adds the child to node.children.
-    Defining a parent (node.set_parent(parent)) add the node to the parents children.
-
-    methods:
-        set_child(x): adds x to node.children
-        set_parent(x): adds the node to x.children
-        is_leaf(): returns bool if both: node is in Tree and node has no children
-        as_root(): returns a Tree object with the node as the tree root.
-        copy(name, grafted:bool=True): copies the node and grafts the copy to the node parent if indicated
-        explant(): removes all parental bindings of the node. Also removes all connection to the parent tree.
-            descendant nodes loose theit connection to the node's parent tree. Although keep bindings with the node.
-            Explantend node can be grafted to another node (as root) or another node (as child)
-        graft(other: Union[Tree, Node]):
-            explants the node and grafts it to an empty tree (as root) or to a node (as a child)
-
-    attributes:
-        tree: Tree the node belongs to
-        parent: parent node
-        children: list of children nodes
-        parental_bond
-
-    attributes:
-        tree: (getter, setter) node's tree
-
-
-    If added to an empty Tree becomes tree.root.
-
+with all the side code
 """
 
 from typing import Optional
@@ -41,6 +10,7 @@ from itertools import chain
 import numpy as np
 from ptbtree.models.navigator import TreeNavigator
 from ptbtree.common.errors import *
+from ptbtree.support.validation import validate_str
 from collections.abc import Iterable
 
 
@@ -72,34 +42,38 @@ class ParentHolder:
 
 class NodeBinderMethods:
     """
-    This class provides methods to Node that facilitate node binding
+    This class provides Node methods to facilitate node binding.
     """
 
+    def negotiate_bond(self, parent, child, weight):
+        if parent.tree is None:
+            raise NodeError('Nodes can not be bound outside Tree. Parent Node must be asigned to Tree, beforehand.')
+        parent.children.add(child)
+        child._parent_ = parent
+        child.parental_bond = ParentalBond(weight)
+        # asigning to tree must go after binding nodes
+        #  otherwise a child without a parent will attempt to be set as a root of the parent tree
+        child.tree = parent.tree
+
+
     def set_parent(self, parent_node, weight=1, _bidirect=True):
+
         if hasattr(self, '_parent_') and isinstance(self._parent_, Node):
             raise NodeError('Node Parent can be only set once. '
-                                 'To subscribe node to another parent, create the node copy with grafted=False.')
+                                 'To subscribe node to another parent, use method graft.')
         if not isinstance(parent_node, Node):
             raise TypeError(f'Could not set parent with type {type(parent_node)}. Valid type is Node only.')
-        self._parent_ = parent_node
-        if _bidirect:
-            parent_node.set_child(self, weight=weight, _bidirect=False)
-        self.tree = parent_node.tree  # tree ascribing happens only when parent is ascribed
-        #self.parental_bond.weight = weight
+
+        self.negotiate_bond(parent_node, self, weight)
+
 
     def set_child(self, child_node, weight=1, _bidirect=True):
         if not isinstance(child_node, Node):
             raise TypeError (f'Can not set Node child with tyle {type(child_node)}')
         if child_node in self.children:
             raise NodeError(f'{child_node} already in {self} children.')
-        self.children.add(child_node)
-        child_node.parental_bond = ParentalBond(weight)
 
-        if _bidirect:
-            child_node.set_parent(self, weight=weight, _bidirect=False)
-        else:
-            pass
-            #child_node.parental_bond.weight = weight
+        self.negotiate_bond(self, child_node, weight)
 
 
 class TreeHolder:
@@ -127,32 +101,61 @@ class ParentalBond():
 
 class Node(NodeBinderMethods):
     """
-    Node of Tree
+    Node of Tree.
+    Is an abstract structure that represents a node of a tree graph.
+    It can exist on its own but as such will not contribute any functionality over binding ability to other nodes.
+    Node can have multiple child nodes but only one parent.
+    A parent and children of a node must be type node.
 
+    Defining a child (node.set_child(child: Node)) adds the child to node.children.
+    Defining a parent (node.set_parent(parent: Node)) add the node to the parents children.
+    If Node instance has children (node.children : list) is considered a parent of the children nodes.
+    If Node instance has a parent (node.parent) is considered to be a child of the parent.
+
+    All instantiation arguments are keyed arguments.
     :param name: str - must be declared. Optionally if is set to 'int', Node.name will be index number in the tree it belongs to.
         If tree is grafted, tree nodes names will not be reindexed.
     :param parent: Node - if not declared, an attempt will be made to set the node the root of the declared tree
     :param tree: Tree - the ActionTee object the node is to be assigned to.
+
+
+    methods:
+        set_child(x): adds x to node.children
+        set_parent(x): adds the node to x.children
+        is_leaf(): returns bool if both: node is in Tree and node has no children
+        as_root(): returns a Tree object with the node as the tree root.
+        copy(name, grafted:bool=True): copies the node and grafts the copy to the node parent if indicated
+        explant(): removes all parental bindings of the node. Also removes all connection to the parent tree.
+            descendant nodes loose theit connection to the node's parent tree. Although keep bindings with the node.
+            Explantend node can be grafted to another node (as root) or another node (as child)
+        graft(other: Union[Tree, Node]):
+            explants the node and grafts it to an empty tree (as root) or to a node (as a child)
+
+    attributes:
+        tree: (getter, setter) Tree the node belongs to
+        parent: parent node
+        children: list of children nodes
+        parental_bond
 
     """
     children = ChildrenHolder()
     parent = ParentHolder()
     tree = TreeHolder()
 
-    def __init__(self, *, tree=None, parent=None, bind_weight=1, name: Optional[str] = None):
+    def __init__(self, *, tree=None, parent=None, bond_weight=1, name: Optional[str] = None):
         self.tier = None
         self.parental_bond = None
 
         if parent:
-            self.set_parent(parent, weight=bind_weight)
+            self.set_parent(parent, weight=bond_weight)
 
         if tree:
             self.tree = tree
-        # else if parent - parent will deal tith ascribing tree to children
+        # else if parent - parent will deal with ascribing tree to children
 
         if not name:
             if self.tree:
-                name = len(self.tree.nodes) - 1  # this is becase at this point the node is already added to a tree
+                name = len(self.tree.nodes) - 1  # This is intentional. At this point the node is already added to a tree
             else:
                 raise NodeError('Can not use ordinal number for name as the node has not been ascribed to a tree.')
         self.name = name

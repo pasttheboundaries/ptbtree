@@ -1,7 +1,6 @@
 import unittest
-from typing import Callable
-from actree.models.actionargs import CallableArg, PropertyArg
-from actree.models.action import Action
+from ptbtree.models.actionargs import CallableArg, PropertyArg
+from ptbtree.models.action import Action
 
 
 class TestCallableArg(unittest.TestCase):

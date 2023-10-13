@@ -16,7 +16,7 @@ Navigating the ActionTree is equal to calling navigation methods while moving be
 
 """
 __version__ = 0.1
-__author__ = pasttheboundaries@gmail.com
+__author__ = 'pasttheboundaries@gmail.com'
 
 from .models.tree import Node, Tree
 from .models.actiontree import ActionTree, ActionNode, Action, CheckinError, TreeCutError, NavigationError, OwnerNode
