@@ -102,12 +102,19 @@ class UnidirectionalPath(UserList):
         return f'<{self.__class__.__name__} nodes:{[n.name for n in self]}>'
 
 
+    def __invert__(self):
+        return self.invert()
+
+
 class ForwardPath(UnidirectionalPath, WeightedPath):
-    pass
+    def invert(self):
+        return BackwardPath(self[::-1])
 
 
 class BackwardPath(UnidirectionalPath, WeightedPath):
-    pass
+    def invert(self):
+        return ForwardPath(self[::-1])
+
 
 
 class UnnavigablePathPoint(WeightedPath):
@@ -120,6 +127,12 @@ class UnnavigablePathPoint(WeightedPath):
 
     def iter_nodes(self):
         yield self.node
+
+    def invert(self):
+        return self
+
+    def __invert__(self):
+        return self.invert()
 
     def __bool__(self):
         return True
@@ -201,6 +214,12 @@ class CompositePath(UserList, WeightedPath):
     def weights(self):
         return tuple(w for unidirectional_path in self for w in unidirectional_path.weights)
 
+    def invert(self):
+        return CompositePath(*[unidirect_path.invert() for unidirect_path in tuple(self)[::-1]])
+
+    def __invert__(self):
+        return self.invert()
+
     def __bool__(self):
         return all(unidirect for unidirect in self)
 
@@ -242,6 +261,9 @@ class ForwardActionPath(ForwardPath, ActionPath):
         for node in self:
             yield node.to
 
+    def invert(self):
+        return BackwardActionPath(self[::-1])
+
 
 class BackwardActionPath(BackwardPath, ActionPath):
     def follow(self):
@@ -256,6 +278,9 @@ class BackwardActionPath(BackwardPath, ActionPath):
         """
         for node in self:
             yield node.back
+
+    def invert(self):
+        return ForwardActionPath(self[::-1])
 
 
 class UnnavigableActionPathPoint(UnnavigablePathPoint, ActionPath):
@@ -299,6 +324,9 @@ class CompositeActionPath(CompositePath, ActionPath):
         for unidirect_path in self:
             for nav in unidirect_path.iter_navigations():
                 yield nav
+
+    def invert(self):
+        return CompositeActionPath(*[unidirect_path.invert() for unidirect_path in tuple(self)[::-1]])
 
     def __add__(self, other):
         if isinstance(other, ActionPath):

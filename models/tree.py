@@ -6,8 +6,10 @@ with all the side code
 
 from typing import Optional
 from itertools import chain
+from tqdm import tqdm
 
 import numpy as np
+import pandas as pd
 from ptbtree.models.navigator import TreeNavigator
 from ptbtree.common.errors import *
 from ptbtree.support.validation import validate_str
@@ -75,6 +77,8 @@ class NodeBinderMethods:
 
         self.negotiate_bond(self, child_node, weight)
 
+    add_child = set_child  # alias
+
 
 class TreeHolder:
     def __get__(self, instance, owner):
@@ -83,6 +87,7 @@ class TreeHolder:
         return instance._tree_
 
     def __set__(self, instance, tree):
+
         # def tree(self, t):
         if not isinstance(tree, Tree):
             raise TypeError(f'Could not set tree with type {type(tree)}. Valid type is Tree only.')
@@ -149,7 +154,7 @@ class Node(NodeBinderMethods):
         if parent:
             self.set_parent(parent, weight=bond_weight)
 
-        if tree:
+        if tree is not None:
             self.tree = tree
         # else if parent - parent will deal with ascribing tree to children
 
@@ -354,7 +359,7 @@ class TreePandasPlugin:
 
     @classmethod
     def _read_rows(cls, df, tree, weights):
-        for ind in range(df.shape[0]):
+        for ind in tqdm(range(df.shape[0]), 'Building Tree from DataFrame'):
             row = df.iloc[ind, :]
             tree = cls._read_row(row, tree, ind, weights)
         return tree
@@ -384,6 +389,20 @@ class TreePandasPlugin:
 
             parent.set_child(child, weight=weight)
         return tree
+
+    def to_df(self):
+        if not self:
+            return None
+        df = pd.DataFrame()
+        ind = 0
+        for leaf in tqdm(self.iter_leaves(), 'Composing DataFrame from Tree'):
+            current_node = leaf
+            while current_node:
+                df.at[ind, current_node.tier] = current_node.name
+                current_node = current_node.parent
+            ind += 1
+        df = df[sorted(df.columns)]
+        return df
 
 
 class Tree(TreePandasPlugin):
@@ -569,6 +588,9 @@ class Tree(TreePandasPlugin):
 
     def find_path(self, target, start=None):
         return self.navigator.find_path(target, start)
+
+    def __bool__(self):
+        return bool(self.root)
 
     def __contains__(self, item):
         if not isinstance(item, Node):

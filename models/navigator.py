@@ -4,10 +4,25 @@ ActionTreeNavigator is an object that navigates ActionTree
 """
 
 from typing import Union
+from collections import defaultdict
 from ptbtree.common.errors import NoRootException, NavigationError
 from ptbtree.models.paths import (ForwardPath, BackwardPath, CompositePath, UnnavigablePathPoint,
                                  ForwardActionPath,BackwardActionPath, CompositeActionPath,
                                  UnnavigableActionPathPoint)
+
+
+class PathsCache:
+    def __init__(self):
+        self.d = defaultdict(dict)
+
+    def get(self, n1, n2):
+        path = self.d[n1].get(n2)
+        if path:
+            return path
+
+    def update(self, n1, n2, path):
+        self.d[n1][n2] = path
+        self.d[n2][n1] = path.invert()
 
 
 class TreeNavigator:
@@ -25,6 +40,8 @@ class TreeNavigator:
         self.current_node = None
         self.history = list()
         self.current_node = tree.root
+        self.paths_cache = PathsCache()
+
 
     def tree_navigable(self):
         if self.tree.root is None:
@@ -32,19 +49,26 @@ class TreeNavigator:
         return True
 
     def find_path(self, target, start=None):
+        start = start or self.tree.root
+        if path := self.paths_cache.get(start, target):
+            return path
+
         self.tree_navigable()
         if target not in self.tree:
             raise NavigationError(f'{target} not in {self.tree}')
-        current = start or self.tree.root
 
-        if target == current:
-            return self.COMPOSITE_PATH_TYPE(self.UNNAVIGAVLE_PP_TYPE(current))
-        if forward := self._search_forward_path(current, target):
-            return forward
-        elif backward := self._search_backward_path(current, target):
-            return backward
+        if start == target:
+            path = self.COMPOSITE_PATH_TYPE(self.UNNAVIGAVLE_PP_TYPE(start))
+            self.paths_cache.update(start, target, path)
+            return path
+        if path := self._search_forward_path(start, target):
+            self.paths_cache.update(start, target, path)
+            return path
+        elif path := self._search_backward_path(start, target):
+            self.paths_cache.update(start, target, path)
+            return path
         else:
-            raise NavigationError(f'Could not find fixed_path to node {target}')
+            raise NavigationError(f'Could not find fixed_path from {start} to {target}')
 
     def _search_forward_path(self, current, target) -> CompositePath:
         forward_path = self._search_forward(current=current, target=target)
