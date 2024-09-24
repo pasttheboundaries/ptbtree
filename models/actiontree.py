@@ -264,13 +264,15 @@ class ActionTree(Tree):
         else:
             return CompositeActionPath()
 
-    def find_path(self, target, start=None):
+    def find_path(self, start=None, target=None):
+        if not target:
+            raise ValueError('target must be set')
         return self.navigator.find_path(target, start=start)
 
     def follow(self, target, start=None):
         self.cutblock()
         start = start or self.current_node or self.root
-        path = self.find_path(target, start)
+        path = self.find_path(start, target)
         return DerailSafeNavigationManager(self, path).follow()  # navigation result
 
     def internalize(self, namespace: Mapping):

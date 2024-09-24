@@ -42,8 +42,7 @@ class DerailPathfinder:
         """
         logger.debug(f'attempting to create a new fixed_path')
         self._find_active()
-        return self.tree.find_path(self.target, start=self.tree.current_node)
-
+        return self.tree.find_path(start=self.tree.current_node, target=self.target)
 
 
 class DerailSafeNavigationManager:

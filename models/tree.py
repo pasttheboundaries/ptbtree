@@ -4,16 +4,18 @@ Node and Tree
 with all the side code
 """
 
-from typing import Optional
+from collections.abc import Iterable
 from itertools import chain
-from tqdm import tqdm
+from typing import Optional
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
-from ptbtree.models.navigator import TreeNavigator
-from ptbtree.common.errors import *
-from ptbtree.support.validation import validate_str
-from collections.abc import Iterable
+from tqdm import tqdm
+
+from .distance import DistanceCounter
+from .navigator import TreeNavigator
+from ..common.errors import *
 
 
 class ChildrenCollection(set):
@@ -54,9 +56,8 @@ class NodeBinderMethods:
         child._parent_ = parent
         child.parental_bond = ParentalBond(weight)
         # asigning to tree must go after binding nodes
-        #  otherwise a child without a parent will attempt to be set as a root of the parent tree
+        # otherwise a child without a parent will attempt to be set as a root of the parent tree
         child.tree = parent.tree
-
 
     def set_parent(self, parent_node, weight=1, _bidirect=True):
 
@@ -67,7 +68,6 @@ class NodeBinderMethods:
             raise TypeError(f'Could not set parent with type {type(parent_node)}. Valid type is Node only.')
 
         self.negotiate_bond(parent_node, self, weight)
-
 
     def set_child(self, child_node, weight=1, _bidirect=True):
         if not isinstance(child_node, Node):
@@ -91,7 +91,7 @@ class TreeHolder:
         # def tree(self, t):
         if not isinstance(tree, Tree):
             raise TypeError(f'Could not set tree with type {type(tree)}. Valid type is Tree only.')
-        if instance.tree and not instance.tree is tree:
+        if instance.tree and not (instance.tree is tree):
             raise NodeError(f'Node already in Tree. A new tree can only be applied by grafting the node.')
         instance._tree_ = tree
         for desc in instance.children:
@@ -99,7 +99,7 @@ class TreeHolder:
         instance._tree_.add_node(instance)
 
 
-class ParentalBond():
+class ParentalBond:
     def __init__(self, weight=1):
         self.weight = weight
 
@@ -225,6 +225,15 @@ class Node(NodeBinderMethods):
 
         return self_copy
 
+    def distance(self, other, weighted=True):
+        if not isinstance(other, Node):
+            raise TypeError(f'Can not count distance between Node and {other}')
+        if not self.tree:
+            raise ValueError(f'{self} is not in a Tree')
+        if self.tree != other.tree:
+            raise ValueError(f'Can not count distance in nodes of different Trees')
+        return self.tree.distance(self, other)
+
     def explant(self):
         self.parent.children.remove(self)
         self._parent_ = None
@@ -247,7 +256,6 @@ class Node(NodeBinderMethods):
             self.set_parent(other, weight=bind_weight)
         else:
             raise TypeError(f'Node can only be grafted to Tree another Node')
-
 
     def __eq__(self, other):
         if isinstance(other, Node):
@@ -313,43 +321,20 @@ class TreePandasPlugin:
                 - 6 (leaf)
 
         :param df: DataFrame
+        :param weights: Union[np.ndarray, Iterable, float, int, None]
         :return: Tree
         """
 
-        import pandas as pd
-
         # checking df
-        if isinstance(df, str):
-            df = pd.read_csv(df)
-        elif isinstance(df, pd.DataFrame):
-            pass
-        else:
-            raise TypeError('Expected pandas.DataFrame or valid fixed_path to csv.')
+        df = cls.check_df(df)
+
+        # extracting root
         root_values = df.iloc[:, 0].unique()
         if len(root_values) != 1:
             raise TreeError(f'Found {len(root_values)} different values in column 0. Unable to compile Tree.')
 
         # weights
-        if isinstance(weights, np.ndarray):
-            expected_shape = (df.shape[0], df.shape[1] - 1)
-            if weights.shape == expected_shape:
-                pass
-            else:
-                raise ValueError (f'Invalid weights array. Expected shape {expected_shape}, got {weights.shape}')
-        elif isinstance(weights, Iterable):
-            weights = np.array(weights).flatten().reshape(1,-1)
-            if weights.shape[1] != df.shape[1] - 1:
-                raise ValueError(
-                    f'Weights apply to parenent-child bindings. Expected number is {df.shape[1] - 1}.'
-                    f' Got {len(weights)}')
-            else:
-                pass
-        elif isinstance(weights, float):
-            weights = (np.ones(df.shape[1] - 1) * weights).reshape(1,-1)
-        elif weights is None:
-                weights = np.ones(df.shape[1] - 1).reshape(1,-1)
-        else:
-            raise ValueError (f'Could not parse weights{weights}')
+        weights = cls.prepare_weights(weights, df)
 
         tree = Tree()
         root = Node(name=root_values[0])
@@ -357,15 +342,49 @@ class TreePandasPlugin:
 
         return cls._read_rows(df, tree, weights)
 
+    @staticmethod
+    def check_df(df):
+        if isinstance(df, str):
+            df = pd.read_csv(df)
+        elif isinstance(df, pd.DataFrame):
+            pass
+        else:
+            raise TypeError('Expected pandas.DataFrame or valid fixed_path to csv.')
+        return df
+
+    @staticmethod
+    def prepare_weights(weights, df):
+        if isinstance(weights, np.ndarray):
+            expected_shape = (df.shape[0], df.shape[1] - 1)
+            if weights.shape == expected_shape:
+                pass
+            elif weights.shape == (df.shape[1] - 1,):
+                weights = weights.reshape(1, -1)
+            else:
+                raise ValueError(f'Invalid weights array. Expected shape {expected_shape}, got {weights.shape}')
+        elif isinstance(weights, Iterable):
+            weights = np.array(weights).flatten().reshape(1, -1)
+            if weights.shape[1] != df.shape[1] - 1:
+                raise ValueError(
+                    f'Weights apply to parenent-child bindings. Expected number is {df.shape[1] - 1}.'
+                    f' Got {len(weights)}')
+        elif isinstance(weights, (float, int)):
+            weights = (np.ones(df.shape[1] - 1) * weights).reshape(1, -1)
+        elif weights is None:
+            weights = np.ones(df.shape[1] - 1).reshape(1, -1)
+        else:
+            raise ValueError(f'Could not parse weights{weights}')
+        return weights
+
     @classmethod
     def _read_rows(cls, df, tree, weights):
-        for ind in tqdm(range(df.shape[0]), 'Building Tree from DataFrame'):
+        for ind in tqdm(range(df.shape[0]), 'Building Tree from DataFrame', total=df.shape[0]):
             row = df.iloc[ind, :]
             tree = cls._read_row(row, tree, ind, weights)
         return tree
 
     @classmethod
-    def _read_row(cls, row, tree, ind, weights):
+    def _read_row_(cls, row, tree, ind, weights):
         for col in range(1, len(row)):
             parent_tier_index = col - 1
             df_parent_value = row.iat[parent_tier_index]
@@ -384,8 +403,31 @@ class TreePandasPlugin:
             else:
                 continue
 
-
             weight = weights[min(ind, weights.shape[0] - 1), parent_tier_index]
+
+            parent.set_child(child, weight=weight)
+        return tree
+
+    @classmethod
+    def _read_row(cls, row, tree, ind, weights):
+        for col in range(1, len(row)):
+
+            current_value = row.iat[col]
+            if current_value in cls.DF_STOP_VALUES:
+                return tree
+
+            previous = tuple(row.iloc[1:col])
+            if previous:
+                parent = tree.get_node(*previous)
+            else:
+                parent = tree.root
+
+            if any(child.name == current_value for child in parent.children):
+                continue
+            else:
+                child = Node(name=current_value)
+
+            weight = weights[min(ind, weights.shape[0] - 1), parent.tier]
 
             parent.set_child(child, weight=weight)
         return tree
@@ -395,7 +437,7 @@ class TreePandasPlugin:
             return None
         df = pd.DataFrame()
         ind = 0
-        for leaf in tqdm(self.iter_leaves(), 'Composing DataFrame from Tree'):
+        for leaf in tqdm(self.iter_leaves(), 'Composing DataFrame from Tree', total=self.nleaf):
             current_node = leaf
             while current_node:
                 df.at[ind, current_node.tier] = current_node.name
@@ -419,15 +461,15 @@ class Tree(TreePandasPlugin):
     """
     instances = TreeInstances()
 
-    def __init__(self, root: Optional[Node] = None, name: Optional[str] = None):
+    def __init__(self, root: Optional[Node] = None, name: Optional[str] = None, weighted=True):
         self.name = name
-
         if root:
             self.add_node(root)
 
         self.instances.append(self)
         self.navigator = TreeNavigator(self)
         self.ntier = 0
+        self.distance_counter = DistanceCounter(weighted=weighted)
 
     @property
     def root(self):
@@ -489,6 +531,12 @@ class Tree(TreePandasPlugin):
             self.asign_tiers(child, tier=tier + 1)
         return self
 
+    def distance(self, n1: Node, n2: Node):
+        if any(not isinstance(n, Node) for n in (n1,n2)):
+            raise TypeError(f'Expected type Node.')
+        return self.distance_counter.distance(n1, n2)
+        # return self.find_path(n1, n2).weight
+
     def graft(self, node):
         """
         grafts Tree (self) to an existing Node, which must belong to another Tree
@@ -547,7 +595,7 @@ class Tree(TreePandasPlugin):
         return (n for n in self.nodes if not n.children)
 
     def iter_branches(self):
-        return (self.find_path(leaf, self.root) for leaf in self.iter_leaves())
+        return (self.find_path(self.root, leaf) for leaf in self.iter_leaves())
 
     @property
     def nleaf(self):
@@ -557,6 +605,7 @@ class Tree(TreePandasPlugin):
     def nbond(self):
         return len([n for n in self.nodes if n.parental_bond])
 
+    @lru_cache(maxsize=65536)
     def get_node(self, *names, ignorecase=True, start=None):
         """
         Returns a node by its name.
@@ -565,7 +614,7 @@ class Tree(TreePandasPlugin):
         This allows climbing the tree even if multiple nodes of one tier have descendants of the same name.
         like in:
         get_node('family', 'father', 'room')
-        # will return 'room' which is descendant of 'father'
+        # will return Node(name='room') which is descendant of 'father'
         # whilst also other members of the family might have 'room' node.
         """
         start = start or self.root
@@ -586,7 +635,9 @@ class Tree(TreePandasPlugin):
         else:
             return node
 
-    def find_path(self, target, start=None):
+    def find_path(self, start=None, target=None):
+        if not target:
+            raise ValueError(f'target must be set')
         return self.navigator.find_path(target, start)
 
     def __bool__(self):

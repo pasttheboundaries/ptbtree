@@ -7,8 +7,8 @@ from typing import Union
 from collections import defaultdict
 from ptbtree.common.errors import NoRootException, NavigationError
 from ptbtree.models.paths import (ForwardPath, BackwardPath, CompositePath, UnnavigablePathPoint,
-                                 ForwardActionPath,BackwardActionPath, CompositeActionPath,
-                                 UnnavigableActionPathPoint)
+                                  ForwardActionPath, BackwardActionPath, CompositeActionPath,
+                                  UnnavigableActionPathPoint)
 
 
 class PathsCache:
@@ -42,8 +42,7 @@ class TreeNavigator:
         self.current_node = tree.root
         self.paths_cache = PathsCache()
 
-
-    def tree_navigable(self):
+    def check_tree_navigable(self):
         if self.tree.root is None:
             raise NoRootException(self.tree)
         return True
@@ -53,7 +52,7 @@ class TreeNavigator:
         if path := self.paths_cache.get(start, target):
             return path
 
-        self.tree_navigable()
+        self.check_tree_navigable()
         if target not in self.tree:
             raise NavigationError(f'{target} not in {self.tree}')
 
@@ -61,6 +60,7 @@ class TreeNavigator:
             path = self.COMPOSITE_PATH_TYPE(self.UNNAVIGAVLE_PP_TYPE(start))
             self.paths_cache.update(start, target, path)
             return path
+
         if path := self._search_forward_path(start, target):
             self.paths_cache.update(start, target, path)
             return path
@@ -68,13 +68,12 @@ class TreeNavigator:
             self.paths_cache.update(start, target, path)
             return path
         else:
-            raise NavigationError(f'Could not find fixed_path from {start} to {target}')
+            raise NavigationError(f'Could not find fixed path from {start} to {target}')
 
     def _search_forward_path(self, current, target) -> CompositePath:
         forward_path = self._search_forward(current=current, target=target)
-        #return self.COMPOSITE_PATH_TYPE(self.FORWARD_PATH_TYPE(forward_path[1:]))
+        # return self.COMPOSITE_PATH_TYPE(self.FORWARD_PATH_TYPE(forward_path[1:]))
         return self.UNNAVIGAVLE_PP_TYPE(current) + self.FORWARD_PATH_TYPE(forward_path[1:])
-
 
     def _search_forward(self, current, target) -> ForwardPath:
         if target == current:
